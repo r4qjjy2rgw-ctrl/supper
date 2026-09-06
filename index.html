@@ -499,6 +499,17 @@ var KROGER_AUTHORIZE_URL = 'https://api.kroger.com/v1/connect/oauth2/authorize';
 var KROGER_SCOPES = 'product.compact cart.basic:write profile.compact';
 var KROGER_PKCE_STASH_KEY = 'supper_kroger_pkce';
 
+// Normalizes away a trailing index.html so the redirect URI is identical
+// whether Supper is opened as a plain browser tab or launched from a
+// home-screen icon (which resolves through the PWA manifest's start_url
+// and can land on .../supper/index.html instead of .../supper/).
+// Without this, the two launch paths compute two different redirect_uri
+// values and Kroger rejects whichever one wasn't registered.
+function getKrogerRedirectUri(){
+  var path = window.location.pathname.replace(/index\.html$/i, '');
+  return window.location.origin + path;
+}
+
 function base64url(bytes){
   var str = '';
   for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
@@ -521,7 +532,7 @@ function startKrogerConnect(){
   if (!kroger.workerUrl){ toast('Add your Worker URL first'); return; }
   var verifier = randomPkceString();
   var state = randomPkceString();
-  var redirectUri = window.location.origin + window.location.pathname;
+  var redirectUri = getKrogerRedirectUri();
   pkceChallenge(verifier).then(function(challenge){
     localStorage.setItem(KROGER_PKCE_STASH_KEY, JSON.stringify({ verifier: verifier, state: state, redirectUri: redirectUri }));
     var url = KROGER_AUTHORIZE_URL + '?' + new URLSearchParams({
@@ -554,7 +565,7 @@ function handleKrogerRedirectIfPresent(){
   var code = params.get('code');
   if (!code) return;
   var stashRaw = localStorage.getItem(KROGER_PKCE_STASH_KEY);
-  window.history.replaceState({}, '', window.location.origin + window.location.pathname);
+  window.history.replaceState({}, '', getKrogerRedirectUri());
   if (!stashRaw){ toast('Kroger connect failed — try again'); return; }
   var stash = JSON.parse(stashRaw);
   localStorage.removeItem(KROGER_PKCE_STASH_KEY);

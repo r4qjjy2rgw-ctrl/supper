@@ -2,7 +2,7 @@
   "name": "Supper — Meal Planner",
   "short_name": "Supper",
   "description": "Recipe box, weekly plan, and grocery list for the Janico kitchen.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
