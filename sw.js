@@ -1,6 +1,10 @@
-// Minimal offline cache. Bump CACHE_NAME whenever index.html changes
-// meaningfully so returning phones pick up the new version.
-var CACHE_NAME = 'supper-v3';
+// Network-first: every load tries the network first, so a fresh deploy
+// shows up on the very next reload. The cache only kicks in as a fallback
+// when there's no connection (the actual point of this file — working at
+// the store with spotty signal), not as the default source of truth.
+// No more manual CACHE_NAME bumping needed on every deploy — freshness now
+// comes from always asking the network first, not from cache versioning.
+var CACHE_NAME = 'supper-cache';
 var ASSETS = [
   './',
   './index.html',
@@ -28,12 +32,11 @@ self.addEventListener('activate', function(event){
 self.addEventListener('fetch', function(event){
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then(function(cached){
-      var fetchPromise = fetch(event.request).then(function(networkResponse){
-        caches.open(CACHE_NAME).then(function(cache){ cache.put(event.request, networkResponse.clone()); });
-        return networkResponse;
-      }).catch(function(){ return cached; });
-      return cached || fetchPromise;
+    fetch(event.request).then(function(networkResponse){
+      caches.open(CACHE_NAME).then(function(cache){ cache.put(event.request, networkResponse.clone()); });
+      return networkResponse;
+    }).catch(function(){
+      return caches.match(event.request);
     })
   );
 });
