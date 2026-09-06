@@ -614,6 +614,96 @@ function ensureKrogerToken(){
     .catch(function(){ return null; });
 }
 
+// Matches a grocery-list item name against the saved Kroger product
+// repository (seeded from receipts) by word overlap against each
+// product's searchTerms. Returns the best match, or null if nothing
+// scores above the minimum bar. This is a heuristic, not exact —
+// wrong or missing matches are expected to need occasional correction
+// in Settings > Kroger matches.
+var KROGER_MATCH_STOPWORDS = ['and','the','with','for','fresh','organic','of','a','or'];
+function findKrogerMatch(rawName){
+  var norm = normalize(rawName).replace(/\([^)]*\)/g, '');
+  var words = norm.split(' ').filter(function(w){ return w.length > 2 && KROGER_MATCH_STOPWORDS.indexOf(w) === -1; });
+  if (!words.length) return null;
+  var best = null, bestScore = 0;
+  Store.list('krogerMatches').forEach(function(m){
+    var terms = m.searchTerms || [];
+    var score = 0;
+    words.forEach(function(w){ if (terms.indexOf(w) !== -1) score++; });
+    if (score > bestScore){ bestScore = score; best = m; }
+  });
+  return bestScore >= 1 ? best : null;
+}
+
+function sendGroceryListToKroger(){
+  var kroger = Store.get().kroger;
+  if (!kroger.workerUrl){ toast('Add your Worker URL in Settings first'); return; }
+  toast('Sending to Kroger…');
+  ensureKrogerToken().then(function(token){
+    if (!token){ toast('Not connected — check Settings > Kroger account'); return; }
+
+    var byCat = buildCombinedGroceryList();
+    var all = [];
+    Object.keys(byCat).forEach(function(cat){ all = all.concat(byCat[cat]); });
+    var unchecked = all.filter(function(i){ return !i.checked; });
+
+    if (!unchecked.length){ toast('Nothing on the list to send'); return; }
+
+    var matched = [], unmatched = [];
+    unchecked.forEach(function(item){
+      var m = findKrogerMatch(item.name);
+      if (m) matched.push({ upc: m.upc, quantity: 1, displayName: item.name, matchedName: m.name });
+      else unmatched.push(item.name);
+    });
+
+    if (!matched.length){
+      showCartResultSheet([], unmatched);
+      return;
+    }
+
+    fetch(kroger.workerUrl.replace(/\/$/,'') + '/cart/add', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        access_token: token,
+        items: matched.map(function(m){ return { upc: m.upc, quantity: m.quantity, modality: 'DELIVERY' }; })
+      })
+    }).then(function(r){
+      return r.text().then(function(t){ return { ok: r.ok, status: r.status, text: t }; });
+    }).then(function(res){
+      if (res.ok){
+        showCartResultSheet(matched, unmatched);
+      } else {
+        console.error('Kroger cart add failed', res.status, res.text);
+        toast('Kroger rejected the request (see console) — matching data may need a tweak');
+      }
+    }).catch(function(){
+      toast("Couldn't reach the Worker — check the URL in Settings");
+    });
+  });
+}
+
+function showCartResultSheet(matched, unmatched){
+  var body = el('div');
+  if (matched.length){
+    body.appendChild(el('p', {style:'font-size:15px;line-height:1.5;'}, [
+      matched.length + ' item' + (matched.length===1?'':'s') + ' added to your Kroger cart — one of each, adjust quantities in the Kroger app if a recipe needs more.'
+    ]));
+  } else {
+    body.appendChild(el('p', {style:'font-size:15px;line-height:1.5;color:var(--ink-soft);'}, ["Nothing on the list matched a saved Kroger product yet."]));
+  }
+  if (unmatched.length){
+    body.appendChild(el('div', {class:'section-title'}, ['Add these yourself (' + unmatched.length + ')']));
+    var ul = el('ul', {class:'ing-list'});
+    unmatched.forEach(function(name){ ul.appendChild(el('li', {}, [el('span',{},[name])])); });
+    body.appendChild(ul);
+  }
+  if (matched.length){
+    body.appendChild(el('a', {href:'https://www.kroger.com/cart', target:'_blank', class:'btn btn-primary btn-block', style:'margin-top:16px;text-decoration:none;text-align:center;'}, ['Open Kroger to finish']));
+  }
+  openSheet('Sent to Kroger', body, true);
+}
+
 function readAndResizePhoto(file, maxDim, quality, callback){
   var reader = new FileReader();
   reader.onload = function(e){
@@ -1628,6 +1718,10 @@ function renderGrocery(){
     }}, ['Reset checks'])
   ]);
   root.appendChild(toolRow);
+
+  if (Store.get().kroger.accessToken){
+    root.appendChild(el('button', {class:'btn btn-primary btn-block', style:'margin-bottom:16px;', onclick: sendGroceryListToKroger}, ['Send to Kroger']));
+  }
 
   root.appendChild(el('div', {id:'groceryListWrap'}));
   renderGroceryList();
