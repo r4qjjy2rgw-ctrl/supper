@@ -1,6 +1,6 @@
 // Minimal offline cache. Bump CACHE_NAME whenever index.html changes
 // meaningfully so returning phones pick up the new version.
-var CACHE_NAME = 'supper-v1';
+var CACHE_NAME = 'supper-v2';
 var ASSETS = [
   './',
   './index.html',

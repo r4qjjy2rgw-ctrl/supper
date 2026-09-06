@@ -124,13 +124,15 @@
   .week-glance{display:flex;gap:6px;margin-bottom:14px;}
   .glance-pill{flex:1;text-align:center;padding:9px 0;border-radius:10px;border:1.5px solid var(--line);font-size:12px;font-weight:700;color:var(--ink-soft);background:var(--card);}
   .glance-pill.filled{color:#fff;}
-  .week-shelf{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch;}
-  .shelf-card{position:relative;flex:0 0 148px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 12px 12px;box-shadow:var(--shadow);text-align:left;cursor:pointer;overflow:hidden;}
-  .shelf-card .bar{position:absolute;top:0;left:0;right:0;height:5px;}
+  .week-shelf{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:2px 2px 8px;}
+  .shelf-card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);text-align:left;cursor:pointer;overflow:hidden;}
+  .shelf-card .sc-photo{width:100%;height:92px;object-fit:cover;display:block;}
+  .shelf-card .sc-photo-placeholder{width:100%;height:92px;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:26px;font-weight:600;}
+  .shelf-card .sc-body{padding:10px 12px 12px;}
   .shelf-card .sc-name{font-size:14px;font-weight:600;line-height:1.3;display:block;}
-  .shelf-card .sc-meta{font-size:11.5px;color:var(--ink-soft);margin-top:9px;}
-  .shelf-card .sc-remove{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;background:rgba(43,33,24,.5);color:#fff;border:none;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;}
-  .shelf-add{flex:0 0 108px;border:1.5px dashed var(--line);border-radius:14px;display:flex;align-items:center;justify-content:center;color:var(--herb-dark);font-weight:600;font-size:13px;background:none;text-align:center;padding:10px;}
+  .shelf-card .sc-meta{font-size:11.5px;color:var(--ink-soft);margin-top:6px;}
+  .shelf-card .sc-remove{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;background:rgba(43,33,24,.55);color:#fff;border:none;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;z-index:2;}
+  .shelf-add{min-height:150px;border:1.5px dashed var(--line);border-radius:14px;display:flex;align-items:center;justify-content:center;color:var(--herb-dark);font-weight:600;font-size:13px;background:none;text-align:center;padding:10px;}
   .day-row{
     display:flex;
     align-items:center;
@@ -175,13 +177,15 @@
   .chip.active{background:var(--herb);border-color:var(--herb);color:#fff;}
   .recipe-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .recipe-tile{
-    padding:14px 12px;
-    display:flex;flex-direction:column;justify-content:space-between;
-    min-height:96px;
+    padding:0;
     text-align:left;
     position:relative;
     background:var(--card);
+    overflow:hidden;
   }
+  .recipe-tile .rt-photo{width:100%;height:100px;object-fit:cover;display:block;}
+  .recipe-tile .rt-photo-placeholder{width:100%;height:100px;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Fraunces',serif;font-size:30px;font-weight:600;}
+  .recipe-tile .rt-body{padding:12px 12px 14px;min-height:56px;display:flex;flex-direction:column;justify-content:space-between;}
   .recipe-tile .rt-name{font-size:14.5px;font-weight:600;line-height:1.25;}
   .recipe-tile .rt-meta{font-size:11.5px;color:var(--ink-soft);margin-top:8px;display:flex;justify-content:space-between;align-items:center;}
   .recipe-tile .star{color:var(--gold);font-size:14px;}
@@ -282,6 +286,11 @@
 
   /* Recipe detail */
   .detail-hero{padding:6px 2px 14px;}
+  .detail-photo{width:100%;height:190px;object-fit:cover;border-radius:14px;margin-bottom:4px;display:block;}
+  .photo-picker{position:relative;border-radius:14px;overflow:hidden;}
+  .photo-picker img{width:100%;height:180px;object-fit:cover;display:block;cursor:pointer;}
+  .photo-picker .pp-remove{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:rgba(43,33,24,.6);color:#fff;border:none;font-size:15px;display:flex;align-items:center;justify-content:center;}
+  .photo-picker-empty{width:100%;height:120px;border:1.5px dashed var(--line);border-radius:14px;display:flex;align-items:center;justify-content:center;color:var(--herb-dark);font-weight:600;font-size:14px;background:none;}
   .detail-hero h2{font-size:23px;line-height:1.2;}
   .detail-meta{display:flex;gap:14px;margin-top:8px;color:var(--ink-soft);font-size:13px;flex-wrap:wrap;}
   .servings-stepper{display:flex;align-items:center;gap:10px;margin:16px 0;}
@@ -477,6 +486,141 @@ function tagColor(tag){
   for (var i=0;i<tag.length;i++) h = (h*31 + tag.charCodeAt(i)) >>> 0;
   return ACCENTS[h % ACCENTS.length];
 }
+// Downscale + JPEG-compress a picked photo before it goes into localStorage.
+// Phone photos run 3-8MB raw; storage is capped, so every recipe photo needs
+// to land well under 200KB or the quota gets eaten fast.
+/* ---------------------------------------------------------
+   Kroger OAuth (Authorization Code + PKCE)
+   Client ID is public by design in this flow — safe to ship in JS.
+   The client secret never appears here; it lives only in the Worker.
+--------------------------------------------------------- */
+var KROGER_CLIENT_ID = 'supperjj-bbch1hm8';
+var KROGER_AUTHORIZE_URL = 'https://api.kroger.com/v1/connect/oauth2/authorize';
+var KROGER_SCOPES = 'product.compact cart.basic:write profile.compact';
+var KROGER_PKCE_STASH_KEY = 'supper_kroger_pkce';
+
+function base64url(bytes){
+  var str = '';
+  for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function randomPkceString(){
+  var arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return base64url(arr);
+}
+function pkceChallenge(verifier){
+  var enc = new TextEncoder().encode(verifier);
+  return crypto.subtle.digest('SHA-256', enc).then(function(digest){
+    return base64url(new Uint8Array(digest));
+  });
+}
+
+function startKrogerConnect(){
+  var kroger = Store.get().kroger;
+  if (!kroger.workerUrl){ toast('Add your Worker URL first'); return; }
+  var verifier = randomPkceString();
+  var state = randomPkceString();
+  var redirectUri = window.location.origin + window.location.pathname;
+  pkceChallenge(verifier).then(function(challenge){
+    localStorage.setItem(KROGER_PKCE_STASH_KEY, JSON.stringify({ verifier: verifier, state: state, redirectUri: redirectUri }));
+    var url = KROGER_AUTHORIZE_URL + '?' + new URLSearchParams({
+      scope: KROGER_SCOPES,
+      response_type: 'code',
+      client_id: KROGER_CLIENT_ID,
+      redirect_uri: redirectUri,
+      state: state,
+      code_challenge: challenge,
+      code_challenge_method: 'S256'
+    }).toString();
+    window.location.href = url;
+  }).catch(function(){ toast("Couldn't start the Kroger connection"); });
+}
+
+function disconnectKroger(){
+  var kroger = Store.get().kroger;
+  kroger.accessToken = null;
+  kroger.refreshToken = null;
+  kroger.expiresAt = 0;
+  Store.persist();
+  render();
+}
+
+// Runs once at boot. If the page just came back from Kroger's login
+// with a ?code=..., completes the exchange via the Worker and cleans
+// the URL so a refresh doesn't try to replay a used code.
+function handleKrogerRedirectIfPresent(){
+  var params = new URLSearchParams(window.location.search);
+  var code = params.get('code');
+  if (!code) return;
+  var stashRaw = localStorage.getItem(KROGER_PKCE_STASH_KEY);
+  window.history.replaceState({}, '', window.location.origin + window.location.pathname);
+  if (!stashRaw){ toast('Kroger connect failed — try again'); return; }
+  var stash = JSON.parse(stashRaw);
+  localStorage.removeItem(KROGER_PKCE_STASH_KEY);
+  if (params.get('state') !== stash.state){ toast('Kroger connect failed (state mismatch)'); return; }
+  var kroger = Store.get().kroger;
+  if (!kroger.workerUrl){ toast('Kroger connect failed — Worker URL missing'); return; }
+  fetch(kroger.workerUrl.replace(/\/$/,'') + '/exchange', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ code: code, code_verifier: stash.verifier, redirect_uri: stash.redirectUri })
+  }).then(function(r){ return r.json().then(function(data){ return {ok:r.ok, data:data}; }); })
+    .then(function(res){
+      if (!res.ok || !res.data.access_token){ toast('Kroger connect failed'); console.error(res.data); return; }
+      var k = Store.get().kroger;
+      k.accessToken = res.data.access_token;
+      k.refreshToken = res.data.refresh_token;
+      k.expiresAt = Date.now() + (res.data.expires_in*1000);
+      Store.persist();
+      toast('Kroger connected');
+      render();
+    })
+    .catch(function(){ toast('Kroger connect failed — check the Worker URL'); });
+}
+
+// Returns a valid access token, refreshing first if it's expired.
+// Used by the (future) cart-push feature.
+function ensureKrogerToken(){
+  var kroger = Store.get().kroger;
+  if (!kroger.accessToken) return Promise.resolve(null);
+  if (Date.now() < kroger.expiresAt - 60000) return Promise.resolve(kroger.accessToken);
+  if (!kroger.refreshToken || !kroger.workerUrl) return Promise.resolve(null);
+  return fetch(kroger.workerUrl.replace(/\/$/,'') + '/refresh', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ refresh_token: kroger.refreshToken })
+  }).then(function(r){ return r.json().then(function(data){ return {ok:r.ok, data:data}; }); })
+    .then(function(res){
+      if (!res.ok || !res.data.access_token) return null;
+      var k = Store.get().kroger;
+      k.accessToken = res.data.access_token;
+      if (res.data.refresh_token) k.refreshToken = res.data.refresh_token;
+      k.expiresAt = Date.now() + (res.data.expires_in*1000);
+      Store.persist();
+      return k.accessToken;
+    })
+    .catch(function(){ return null; });
+}
+
+function readAndResizePhoto(file, maxDim, quality, callback){
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var img = new Image();
+    img.onload = function(){
+      var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      callback(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = function(){ toast("Couldn't read that photo"); };
+    img.src = e.target.result;
+  };
+  reader.onerror = function(){ toast("Couldn't read that photo"); };
+  reader.readAsDataURL(file);
+}
 function toast(msg){
   var t = $('#toast');
   t.textContent = msg;
@@ -500,6 +644,8 @@ var Store = (function(){
       groceryItems: {},
       staples: {},
       weekChecks: {}, // { weekStartISO: { normKey: true } }
+      krogerMatches: {}, // { upc: {upc, name, category, searchTerms, orderedCount, orderDates} } — seeded from receipts, editable in Settings
+      kroger: { workerUrl: '', accessToken: null, refreshToken: null, expiresAt: 0, locationId: '02600568' }, // Westhaven Town Village, 411 Whitman St
       settings: {
         householdSize: 4,
         categoryOrder: CATEGORIES.slice(),
@@ -516,6 +662,8 @@ var Store = (function(){
     if (!d.settings) d.settings = blank().settings;
     if (!d.settings.categoryOrder) d.settings.categoryOrder = CATEGORIES.slice();
     if (!d.settings.weekViewMode) d.settings.weekViewMode = 'day';
+    if (!d.krogerMatches) d.krogerMatches = {};
+    if (!d.kroger) d.kroger = { workerUrl: '', accessToken: null, refreshToken: null, expiresAt: 0, locationId: '02600568' };
     return d;
   }
 
@@ -572,6 +720,25 @@ var Store = (function(){
    Seed data — Shannon's captured recipe names.
    Ingredients/steps intentionally empty; needsDetails flags them.
 --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   Kroger product matches — seeded once from receipt exports.
+   Lets the (future) cart-push feature resolve an ingredient
+   name to a real UPC without a live product search.
+--------------------------------------------------------- */
+var KROGER_SEED_MATCHES = [{"upc":"0001111090010","name":"Simple Truth Organic\u00ae Mixed Bell Peppers, 2 ct","category":"Other","searchTerms":["simple","truth","organic","mixed","bell","peppers"],"orderedCount":5},{"upc":"0000000004011","name":"Fresh Bunch of Bananas \u2014 5-7 Bananas, 1 bunch","category":"Other","searchTerms":["bananas"],"orderedCount":4},{"upc":"0000000004409","name":"Fresh Large Bartlett Pear, 1 ct","category":"Produce","searchTerms":["large","bartlett","pear"],"orderedCount":4},{"upc":"0085103500331","name":"Yasso Frozen Greek Yogurt Bars Chocolate Chip Cookie Dough Bars, 3.5 fl oz","category":"Dairy & Eggs","searchTerms":["yasso","frozen","greek","yogurt","bars","chocolate","chip","cookie","dough"],"orderedCount":3},{"upc":"0007457000700","name":"Haagen-Dazs Vanilla Ice Cream, 28 oz., 28.0 .; fluid ounces","category":"Frozen","searchTerms":["haagen","dazs","vanilla","ice","cream","fluid","ounces"],"orderedCount":3},{"upc":"0001111091620","name":"Kroger\u00ae Cut and Peeled Baby Carrots, 16 oz","category":"Other","searchTerms":["kroger","cut","peeled","baby","carrots"],"orderedCount":3},{"upc":"0000000004053","name":"Fresh Large Lemon - Each, 1 each","category":"Produce","searchTerms":["large","lemon"],"orderedCount":3},{"upc":"0001111050204","name":"Kroger\u00ae Mexican Style Blend Shredded Cheese, 8 oz","category":"Dairy & Eggs","searchTerms":["kroger","mexican","blend","shredded","cheese"],"orderedCount":2},{"upc":"0004000058123","name":"M&M'S Minis Milk Chocolate Assortment Family Size Bulk Chocolate Candy Bag, 16.9 oz","category":"Dairy & Eggs","searchTerms":["minis","milk","chocolate","assortment","candy","bag"],"orderedCount":2},{"upc":"0001111011045","name":"Simple Truth Organic\u00ae Crunchy No Sugar Added Peanut Butter, 15 oz","category":"Dairy & Eggs","searchTerms":["simple","truth","organic","crunchy","sugar","added","peanut","butter"],"orderedCount":2},{"upc":"0007684000454","name":"Ben & Jerry's Cookie Dough Ice Cream Bars, 10.1 fl oz","category":"Frozen","searchTerms":["ben","jerrys","cookie","dough","ice","cream","bars"],"orderedCount":2},{"upc":"0001111090360","name":"Simple Truth\u2122 Freeze-Dried Strawberries & Bananas, 1.2 oz","category":"Frozen","searchTerms":["simple","truth","freeze","dried","strawberries","bananas"],"orderedCount":2},{"upc":"0027582100000","name":"Boar's Head Ichiban Teriyaki Style Chicken Breast, 1 1b","category":"Meat & Seafood","searchTerms":["boars","head","ichiban","teriyaki","chicken","breast"],"orderedCount":2},{"upc":"0007274554369","name":"PERDUE\u00ae HARVESTLAND\u00ae Organic Ground Chicken, 1 lb","category":"Meat & Seafood","searchTerms":["perdue","harvestland","organic","ground","chicken"],"orderedCount":2},{"upc":"0026859340000","name":"Service Counter Fresh Atlantic Salmon Portion Farm Raised (never frozen; sustainably sourced), 1 lb","category":"Meat & Seafood","searchTerms":["service","counter","atlantic","salmon","portion","farm","raised","never","frozen","sustainably","sourced"],"orderedCount":2},{"upc":"0003077203399","name":"Always Maxi Pads with Wings Overnight Absorbency Size 4 Unscented, 16 count","category":"Other","searchTerms":["always","maxi","pads","wings","overnight","absorbency","unscented"],"orderedCount":2},{"upc":"0005916550200","name":"Fresh Organic Red Raspberries - 6 oz Clamshell, 6 oz","category":"Other","searchTerms":["organic","red","raspberries","clamshell"],"orderedCount":2},{"upc":"0000000004166","name":"Jumbo Sweet Onions, 1 ct","category":"Other","searchTerms":["jumbo","sweet","onions"],"orderedCount":2},{"upc":"0001111091116","name":"Kroger\u00ae Tri-Color Bell Peppers, 20 oz","category":"Other","searchTerms":["kroger","tri","color","bell","peppers"],"orderedCount":2},{"upc":"0029082900000","name":"Simple Truth Organic\u00ae Boneless & Skinless Fresh Organic Chicken Breasts, 1 each","category":"Other","searchTerms":["simple","truth","organic","boneless","skinless","chicken","breasts"],"orderedCount":2},{"upc":"0001111018999","name":"Simple Truth Organic\u00ae Pink Lady Apples \u2014 2 Pound Bag, 2 lb","category":"Other","searchTerms":["simple","truth","organic","pink","lady","apples","pound","bag"],"orderedCount":2},{"upc":"0000000004225","name":"Fresh Large Ripe Avocado, 1 each","category":"Produce","searchTerms":["large","ripe","avocado"],"orderedCount":2},{"upc":"0000000094593","name":"Organic Long English Cucumber, 1 ct","category":"Produce","searchTerms":["organic","long","english","cucumber"],"orderedCount":2},{"upc":"0001111065510","name":"Deli Kitchen Yellow Corn Tortilla Chips, 16 oz","category":"Bakery","searchTerms":["deli","kitchen","yellow","corn","tortilla","chips"],"orderedCount":1},{"upc":"0001111084511","name":"Kroger\u00ae Distilled Gallon Water, 1 gallon","category":"Beverages","searchTerms":["kroger","distilled","gallon","water"],"orderedCount":1},{"upc":"0004227200071","name":"Amy's Cheddar Cheese Burrito, 6oz","category":"Dairy & Eggs","searchTerms":["amys","cheddar","cheese","burrito","6oz"],"orderedCount":1},{"upc":"0004242150012","name":"Boar's Head White American Cheese, 8 oz","category":"Dairy & Eggs","searchTerms":["boars","head","white","american","cheese"],"orderedCount":1},{"upc":"0004242150009","name":"Boar's Head White Vermont Cheddar Cheese, 8oz","category":"Dairy & Eggs","searchTerms":["boars","head","white","vermont","cheddar","cheese","8oz"],"orderedCount":1},{"upc":"0008823142193","name":"Cello Shredded Parmesan Cheese, 10 oz","category":"Dairy & Eggs","searchTerms":["cello","shredded","parmesan","cheese"],"orderedCount":1},{"upc":"0001410009589","name":"Goldfish\u00ae Cheddar Cheese Crackers Multipack, 9 ct /1oz","category":"Dairy & Eggs","searchTerms":["goldfish","cheddar","cheese","crackers","multipack","1oz"],"orderedCount":1},{"upc":"0074236526447","name":"Horizon Organic DHA Omega-3 Milk - DHA Whole Milk, 1/2 gal","category":"Dairy & Eggs","searchTerms":["horizon","organic","dha","omega","milk","whole","gal"],"orderedCount":1},{"upc":"0001111058721","name":"Kroger\u00ae Mild Cheddar Sliced Cheese, 8 slices /6 oz","category":"Dairy & Eggs","searchTerms":["kroger","mild","cheddar","sliced","cheese","slices"],"orderedCount":1},{"upc":"0001111050159","name":"Kroger\u00ae Mozzarella Shredded Cheese, 8 oz","category":"Dairy & Eggs","searchTerms":["kroger","mozzarella","shredded","cheese"],"orderedCount":1},{"upc":"0001111012939","name":"Kroger\u00ae Mozzarella String Cheese BIG DEAL!, 48 ct /1oz","category":"Dairy & Eggs","searchTerms":["kroger","mozzarella","string","cheese","1oz"],"orderedCount":1},{"upc":"0001111050195","name":"Kroger\u00ae Parmesan Shredded Cheese, 6 oz","category":"Dairy & Eggs","searchTerms":["kroger","parmesan","shredded","cheese"],"orderedCount":1},{"upc":"0003450014002","name":"Land O Lakes Butter with Olive Oil and Sea Salt Tub Spreadable, 21 oz","category":"Dairy & Eggs","searchTerms":["land","lakes","butter","olive","oil","sea","salt","tub","spreadable"],"orderedCount":1},{"upc":"0001111006479","name":"Simple Truth Organic\u2122 Cage Free Grade A Large Brown Eggs, 18 ct","category":"Dairy & Eggs","searchTerms":["simple","truth","organic","cage","free","grade","large","brown","eggs"],"orderedCount":1},{"upc":"0007192170282","name":"Tombstone 5 Cheese Original Crust Frozen Pizza, 19.3 oz","category":"Dairy & Eggs","searchTerms":["tombstone","cheese","original","crust","frozen","pizza"],"orderedCount":1},{"upc":"0089824800101","name":"siggi's Blueberry Icelandic-Style Lowfat Yogurt, 5.3 oz, 5.3 0Z","category":"Dairy & Eggs","searchTerms":["siggis","blueberry","icelandic","lowfat","yogurt"],"orderedCount":1},{"upc":"0007680828098","name":"Barilla Rotini Pasta, Quality Non-GMO and Kosher Certified Pasta, 16 oz","category":"Dry Goods & Pasta","searchTerms":["barilla","rotini","pasta","quality","non","gmo","kosher","certified"],"orderedCount":1},{"upc":"0003940001782","name":"Bush's Great Northern Beans 15.8 oz, 15.8 oz","category":"Dry Goods & Pasta","searchTerms":["bushs","great","northern","beans"],"orderedCount":1},{"upc":"0003010011176","name":"Club\u00ae Crackers Original, 12.5 oz","category":"Dry Goods & Pasta","searchTerms":["club","crackers","original"],"orderedCount":1},{"upc":"0001600010710","name":"Gold Medal\u2122 All Purpose Flour, 32 oz","category":"Dry Goods & Pasta","searchTerms":["gold","medal","all","purpose","flour"],"orderedCount":1},{"upc":"0001111022236","name":"Kroger\u00ae Green Beans, 12 oz","category":"Dry Goods & Pasta","searchTerms":["kroger","green","beans"],"orderedCount":1},{"upc":"0007373100415","name":"Mission Super Soft Flour Tortillas, Soft Taco Size, 10 Count, 17.5 oz","category":"Dry Goods & Pasta","searchTerms":["mission","super","soft","flour","tortillas","taco"],"orderedCount":1},{"upc":"0004600086011","name":"Old El Paso\u2122 Mild Red Enchilada Sauce, 10 oz","category":"Dry Goods & Pasta","searchTerms":["old","paso","mild","red","enchilada","sauce"],"orderedCount":1},{"upc":"0001111089609","name":"Private Selection\u00ae Stir In Basil Pesto Sauce, 10 oz","category":"Dry Goods & Pasta","searchTerms":["private","selection","stir","basil","pesto","sauce"],"orderedCount":1},{"upc":"0074747929623","name":"Rao'S\u00ae Made For Home\u00ae Chicken Noodle Soup, 16 oz","category":"Dry Goods & Pasta","searchTerms":["raos","made","home","chicken","noodle","soup"],"orderedCount":1},{"upc":"0081692502325","name":"SKINNYPOP White Cheddar Flavored Popcorn Bags, .5 oz","category":"Dry Goods & Pasta","searchTerms":["skinnypop","white","cheddar","flavored","popcorn","bags"],"orderedCount":1},{"upc":"0001111085677","name":"Simple Truth Organic\u00ae Cinnamon Applesauce Cups 6 ct /4oz","category":"Dry Goods & Pasta","searchTerms":["simple","truth","organic","cinnamon","applesauce","cups","4oz"],"orderedCount":1},{"upc":"0001111004963","name":"Simple Truth Organic\u00ae Low Sodium Free Range Chicken Broth, 32 oz","category":"Dry Goods & Pasta","searchTerms":["simple","truth","organic","low","sodium","free","range","chicken","broth"],"orderedCount":1},{"upc":"0004227200352","name":"Amy's\u00ae Frozen Organic Non-Dairy Gluten Free Bean & Rice Burrito, 5.5 oz","category":"Frozen","searchTerms":["amys","frozen","organic","non","dairy","gluten","free","bean","rice","burrito"],"orderedCount":1},{"upc":"0007218063811","name":"Red Baron Pepperoni Brick Oven Frozen Pizza, 17.89 oz","category":"Frozen","searchTerms":["red","baron","pepperoni","brick","oven","frozen","pizza"],"orderedCount":1},{"upc":"0007192197185","name":"Tombstone Pepperoni Frozen Pizza, 19.3 oz","category":"Frozen","searchTerms":["tombstone","pepperoni","frozen","pizza"],"orderedCount":1},{"upc":"0003500068048","name":"Colgate 360 Soft Whitening Toothbrush Double Pack, 2 ct","category":"Household","searchTerms":["colgate","360","soft","whitening","toothbrush","double"],"orderedCount":1},{"upc":"0081106801000","name":"Dr Teal's\u00ae Soothe & Sleep with Lavender Epsom Salt Magnesium Soak, 3 lbs","category":"Household","searchTerms":["teals","soothe","sleep","lavender","epsom","salt","magnesium","soak"],"orderedCount":1},{"upc":"0001111086770","name":"Kroger\u00ae Celebration Paper Plates, 100 ct (8.5 in)","category":"Household","searchTerms":["kroger","celebration","paper","plates","100"],"orderedCount":1},{"upc":"0002708448066","name":"Mattel Hot Wheels\u00ae Basic Car Assortment, 1 ct","category":"Household","searchTerms":["mattel","hot","wheels","basic","car","assortment"],"orderedCount":1},{"upc":"0081215403322","name":"Native Coconut & Vanilla Moisturizing Shampoo, 16.5 fl oz","category":"Household","searchTerms":["native","coconut","vanilla","moisturizing","shampoo"],"orderedCount":1},{"upc":"0008087819533","name":"Pantene Daily Moisture Renewal Conditioner, 72 Hour Lush Moisture, 25.1 fl oz","category":"Household","searchTerms":["pantene","daily","moisture","renewal","conditioner","hour","lush"],"orderedCount":1},{"upc":"0003660207917","name":"Ricola\u00ae Original Herb Menthol Cough Drops for Sore Throat and Cough Relief, 17 count","category":"Household","searchTerms":["ricola","original","herb","menthol","cough","drops","sore","throat","relief"],"orderedCount":1},{"upc":"0073291345063","name":"Seventh Generation Free & Clear Liquid Laundry Detergent, 90 fl oz","category":"Household","searchTerms":["seventh","generation","free","clear","liquid","laundry","detergent"],"orderedCount":1},{"upc":"0073291345062","name":"Seventh Generation Lavender Liquid Laundry Detergent, 90 fl oz","category":"Household","searchTerms":["seventh","generation","lavender","liquid","laundry","detergent"],"orderedCount":1},{"upc":"0026917300000","name":"Atlantic Salmon Center Cut, 8 oz","category":"Meat & Seafood","searchTerms":["atlantic","salmon","center","cut"],"orderedCount":1},{"upc":"0028593800000","name":"Boar's Head Grab & Go Maple Honey Turkey Fresh Sliced Deli Meat, 1 lb","category":"Meat & Seafood","searchTerms":["boars","head","grab","maple","honey","turkey","sliced","deli","meat"],"orderedCount":1},{"upc":"0001111063523","name":"Private Selection\u00ae 90/10 Angus Sirloin Ground Beef Tray 1 LB, 1 lb","category":"Meat & Seafood","searchTerms":["private","selection","angus","sirloin","ground","beef","tray"],"orderedCount":1},{"upc":"0007962100001","name":"Wright Brand Applewood Real Wood Smoked Thick Cut Bacon, Stack pack, 1.5 lb","category":"Meat & Seafood","searchTerms":["wright","brand","applewood","real","wood","smoked","thick","cut","bacon"],"orderedCount":1},{"upc":"0007962146100","name":"Wright Brand Hickory Real Wood Smoked Thick Cut Bacon, Stack Pack, 1.5 lb","category":"Meat & Seafood","searchTerms":["wright","brand","hickory","real","wood","smoked","thick","cut","bacon"],"orderedCount":1},{"upc":"0007147900015","name":"Bays Sourdough English Muffins, 6 pc / 12 oz","category":"Other","searchTerms":["bays","sourdough","english","muffins"],"orderedCount":1},{"upc":"0001111020609","name":"Bloom Haus Dozen Rose Orange, 1 ea","category":"Other","searchTerms":["bloom","haus","dozen","rose","orange"],"orderedCount":1},{"upc":"0001111020611","name":"Bloom Haus Dozen Rose Pink, 1 ea","category":"Other","searchTerms":["bloom","haus","dozen","rose","pink"],"orderedCount":1},{"upc":"0001111061461","name":"Bloom Haus Hydrangea Fresh Flower Assorted Bunch, 3 stems","category":"Other","searchTerms":["bloom","haus","hydrangea","flower","assorted","stems"],"orderedCount":1},{"upc":"0001111161069","name":"Dove 4 Bars Original with 1/4 Moisturizing Cream, 4 ct / 3.75 oz","category":"Other","searchTerms":["dove","bars","original","moisturizing","cream"],"orderedCount":1},{"upc":"0003338321000","name":"Fresh Red Raspberries - 6 oz Clamshell, 6 oz","category":"Other","searchTerms":["red","raspberries","clamshell"],"orderedCount":1},{"upc":"0000000004093","name":"Jumbo Yellow Onions, 1 ct","category":"Other","searchTerms":["jumbo","yellow","onions"],"orderedCount":1},{"upc":"0001111018189","name":"Kroger\u00ae Honeycrisp Apples \u2014 3 Pound Bag, 3 lb","category":"Other","searchTerms":["kroger","honeycrisp","apples","pound","bag"],"orderedCount":1},{"upc":"0080812412104","name":"MRS MEYERS CLEAN DAY LiqHandSp LemVerb 12.5floz/6 US, 12.5 fl oz","category":"Other","searchTerms":["mrs","meyers","clean","day","liqhandsp","lemverb","5floz"],"orderedCount":1},{"upc":"0007373100328","name":"Mission Super Soft Extra Thin Yellow Corn Tortillas, 24 Count, 16 oz","category":"Other","searchTerms":["mission","super","soft","extra","thin","yellow","corn","tortillas"],"orderedCount":1},{"upc":"0007373106500","name":"Mission Super Soft Super Size Yellow Corn Tortillas, 10 count","category":"Other","searchTerms":["mission","super","soft","yellow","corn","tortillas"],"orderedCount":1},{"upc":"0000000094093","name":"Organic Jumbo Yellow Onions, 1 ct","category":"Other","searchTerms":["organic","jumbo","yellow","onions"],"orderedCount":1},{"upc":"0000000004662","name":"Shallots, 1 ct","category":"Other","searchTerms":["shallots"],"orderedCount":1},{"upc":"0001111091240","name":"Simple Truth\u00ae Dark Chocolate Covered Almonds, 6 oz","category":"Other","searchTerms":["simple","truth","dark","chocolate","covered","almonds"],"orderedCount":1},{"upc":"0000000004508","name":"Yellow Onions, 1 lb","category":"Other","searchTerms":["yellow","onions"],"orderedCount":1},{"upc":"0000000004593","name":"English Cucumber, 1 ct","category":"Produce","searchTerms":["english","cucumber"],"orderedCount":1},{"upc":"0000000004038","name":"Fresh California Yellow Peach \u2014 Each, 1 ct","category":"Produce","searchTerms":["california","yellow","peach"],"orderedCount":1},{"upc":"0000000004799","name":"Fresh Large Hothouse Grown Premium Red Tomato, 1 ct","category":"Produce","searchTerms":["large","hothouse","grown","premium","red","tomato"],"orderedCount":1},{"upc":"0000000004046","name":"Fresh Medium Ripe Avocado, 1 each","category":"Produce","searchTerms":["medium","ripe","avocado"],"orderedCount":1},{"upc":"0002700039014","name":"Hunt's Tomato Sauce, 15 oz","category":"Produce","searchTerms":["hunts","tomato","sauce"],"orderedCount":1},{"upc":"0002700039005","name":"Hunt's Tomato Sauce, 8 oz","category":"Produce","searchTerms":["hunts","tomato","sauce"],"orderedCount":1},{"upc":"0001111060319","name":"Kroger\u00ae Broccoli Florets 12 oz, 12 oz","category":"Produce","searchTerms":["kroger","broccoli","florets"],"orderedCount":1},{"upc":"0001111018183","name":"Kroger\u00ae Sweet Corn on the Cob, 4 ct","category":"Produce","searchTerms":["kroger","sweet","corn","cob"],"orderedCount":1},{"upc":"0007518500004","name":"Martin's\u00ae Slider Potato Rolls, 12 ct / 15 oz","category":"Produce","searchTerms":["martins","slider","potato","rolls"],"orderedCount":1},{"upc":"0002066200095","name":"Newman's Own Mild Salsa, 16 oz","category":"Produce","searchTerms":["newmans","own","mild","salsa"],"orderedCount":1},{"upc":"0001111091128","name":"Simple Truth Organic\u00ae Baby Spinach, 5 oz","category":"Produce","searchTerms":["simple","truth","organic","baby","spinach"],"orderedCount":1},{"upc":"0001111061240","name":"Simple Truth Organic\u00ae Broccoli Florets, 12 oz","category":"Produce","searchTerms":["simple","truth","organic","broccoli","florets"],"orderedCount":1},{"upc":"0085156200704","name":"The Good Crisp\u2122 Company Original Potato Crisps, 5.6 oz","category":"Produce","searchTerms":["good","crisp","company","original","potato","crisps"],"orderedCount":1},{"upc":"0085156200705","name":"The Good Crisp\u2122 Company Sour Cream & Onion Potato Crisps, 5.6 oz","category":"Produce","searchTerms":["good","crisp","company","sour","cream","onion","potato","crisps"],"orderedCount":1}]
+;
+
+function seedKrogerMatchesIfEmpty(){
+  var d = Store.get();
+  if (Object.keys(d.krogerMatches).length > 0) return;
+  KROGER_SEED_MATCHES.forEach(function(m){
+    Store.put('krogerMatches', {
+      upc: m.upc, name: m.name, category: m.category,
+      searchTerms: m.searchTerms, orderedCount: m.orderedCount
+    });
+  });
+}
+
 function seedIfEmpty(){
   var d = Store.get();
   if (Object.keys(d.recipes).length > 0) return;
@@ -870,11 +1037,19 @@ function buildShelf(pool, weekStartISO, includeAddCard){
   pool.forEach(function(entry){
     var recipe = Store.get().recipes[entry.recipeId];
     if (!recipe) return;
-    var color = tagColor(recipe.tags && recipe.tags[0]) || 'var(--herb)';
+    var photoEl;
+    if (recipe.photo){
+      photoEl = el('img', {class:'sc-photo', src:recipe.photo});
+    } else {
+      var color = tagColor(recipe.tags && recipe.tags[0]) || 'var(--herb)';
+      photoEl = el('div', {class:'sc-photo-placeholder', style:'background:'+color+';'}, [(recipe.name||'?').charAt(0).toUpperCase()]);
+    }
     var card = el('div', { class:'shelf-card', onclick: function(){ openRecipeDetail(recipe.id); } }, [
-      el('div', {class:'bar', style:'background:'+color+';'}),
-      el('span', {class:'sc-name'}, [recipe.name]),
-      el('div', {class:'sc-meta'}, [entry.date ? DOW_FULL[new Date(entry.date+'T00:00:00').getDay()] : 'Not scheduled']),
+      photoEl,
+      el('div', {class:'sc-body'}, [
+        el('span', {class:'sc-name'}, [recipe.name]),
+        el('div', {class:'sc-meta'}, [entry.date ? DOW_FULL[new Date(entry.date+'T00:00:00').getDay()] : 'Not scheduled'])
+      ]),
       el('button', {class:'sc-remove', onclick: function(e){ e.stopPropagation(); Store.softDelete('planEntries', entry.id); render(); }}, ['×'])
     ]);
     shelf.appendChild(card);
@@ -1050,11 +1225,21 @@ function renderRecipeList(){
   }
   grid.style.display = 'grid';
   recipes.forEach(function(r){
+    var photoEl;
+    if (r.photo){
+      photoEl = el('img', {class:'rt-photo', src:r.photo});
+    } else {
+      var color = tagColor(r.tags && r.tags[0]) || 'var(--herb)';
+      photoEl = el('div', {class:'rt-photo-placeholder', style:'background:'+color+';'}, [(r.name||'?').charAt(0).toUpperCase()]);
+    }
     var tile = el('button', { class:'recipe-tile card', onclick: function(){ openRecipeDetail(r.id); } }, [
-      el('div', {class:'rt-name'}, [r.name]),
-      el('div', {class:'rt-meta'}, [
-        el('span', {}, [(r.ingredients||[]).length ? (r.ingredients.length+' ing') : (r.needsDetails ? 'needs details' : '')]),
-        r.favorite ? el('span', {class:'star'}, ['★']) : el('span',{},[])
+      photoEl,
+      el('div', {class:'rt-body'}, [
+        el('div', {class:'rt-name'}, [r.name]),
+        el('div', {class:'rt-meta'}, [
+          el('span', {}, [(r.ingredients||[]).length ? (r.ingredients.length+' ing') : (r.needsDetails ? 'needs details' : '')]),
+          r.favorite ? el('span', {class:'star'}, ['★']) : el('span',{},[])
+        ])
       ])
     ]);
     grid.appendChild(tile);
@@ -1067,6 +1252,9 @@ function openRecipeDetail(id){
   var servings = r.servingsBase || 4;
 
   var body = el('div');
+  if (r.photo){
+    body.appendChild(el('img', {class:'detail-photo', src: r.photo}));
+  }
   var meta = el('div', {class:'detail-meta'});
   if (r.prepMin) meta.appendChild(el('span',{},['Prep ' + r.prepMin + 'm']));
   if (r.cookMin) meta.appendChild(el('span',{},['Cook ' + r.cookMin + 'm']));
@@ -1183,7 +1371,7 @@ function openAddToPlanFromRecipe(recipeId, servings){
 function openRecipeEditor(id){
   var existing = id ? Store.get().recipes[id] : null;
   var draft = existing ? JSON.parse(JSON.stringify(existing)) : {
-    name:'', tags:[], servingsBase:4, prepMin:null, cookMin:null,
+    name:'', tags:[], servingsBase:4, prepMin:null, cookMin:null, photo:null,
     ingredients:[], steps:[], notes:'', favorite:false, needsDetails:false, source:{type:'manual'}
   };
 
@@ -1191,6 +1379,29 @@ function openRecipeEditor(id){
 
   var nameInput = el('input', {type:'text', placeholder:'Recipe name', value: draft.name});
   body.appendChild(el('div', {class:'field'}, [el('label',{},['Name']), nameInput]));
+
+  var photoWrap = el('div');
+  var photoInput = el('input', {type:'file', accept:'image/*', style:'display:none;', onchange: function(e){
+    var file = e.target.files[0];
+    if (!file) return;
+    readAndResizePhoto(file, 640, 0.72, function(dataUrl){
+      draft.photo = dataUrl;
+      renderPhotoPicker();
+    });
+  }});
+  function renderPhotoPicker(){
+    photoWrap.innerHTML = '';
+    if (draft.photo){
+      photoWrap.appendChild(el('div', {class:'photo-picker'}, [
+        el('img', {src: draft.photo, onclick: function(){ photoInput.click(); }}),
+        el('button', {type:'button', class:'pp-remove', onclick: function(e){ e.stopPropagation(); draft.photo = null; renderPhotoPicker(); }}, ['×'])
+      ]));
+    } else {
+      photoWrap.appendChild(el('button', {type:'button', class:'photo-picker-empty', onclick: function(){ photoInput.click(); }}, ['+ Add a photo']));
+    }
+  }
+  renderPhotoPicker();
+  body.appendChild(el('div', {class:'field'}, [el('label',{},['Photo']), photoWrap, photoInput]));
 
   var tagSelect = el('div', {class:'tag-select'});
   MEAL_TAGS.forEach(function(tag){
@@ -1490,6 +1701,29 @@ function renderSettings(){
   group1.appendChild(card1);
   root.appendChild(group1);
 
+  // Kroger account
+  var groupK = el('div', {class:'settings-group'});
+  groupK.appendChild(el('h3', {}, ['Kroger account']));
+  var kroger = Store.get().kroger;
+  var cardK = el('div', {class:'card', style:'padding:14px;'});
+
+  var workerInput = el('input', {type:'text', placeholder:'https://your-worker.workers.dev', value: kroger.workerUrl,
+    onchange: function(e){ var k = Store.get().kroger; k.workerUrl = e.target.value.trim(); Store.persist(); }});
+  cardK.appendChild(el('div', {class:'field'}, [el('label',{},['Worker URL']), workerInput]));
+
+  var isConnected = !!kroger.accessToken;
+  if (isConnected){
+    cardK.appendChild(el('div', {style:'display:flex;align-items:center;gap:8px;margin:4px 0 12px;color:var(--herb-dark);font-weight:600;font-size:14px;'}, [
+      el('span', {}, ['✓ Connected'])
+    ]));
+    cardK.appendChild(el('button', {class:'btn btn-ghost btn-block', onclick: disconnectKroger}, ['Disconnect']));
+  } else {
+    cardK.appendChild(el('button', {class:'btn btn-primary btn-block', onclick: startKrogerConnect}, ['Connect Kroger account']));
+  }
+  groupK.appendChild(cardK);
+  groupK.appendChild(el('p', {style:'font-size:12.5px;color:var(--ink-soft);margin:8px 4px 0;'}, ['Paste the Worker URL from its deploy output first. "Connect" opens Kroger\u2019s own login — Supper never sees the password.']));
+  root.appendChild(groupK);
+
   // Category order
   var group2 = el('div', {class:'settings-group'});
   group2.appendChild(el('h3', {}, ['Grocery list order']));
@@ -1545,6 +1779,37 @@ function renderSettings(){
   });
   group3.appendChild(stapleInput);
   root.appendChild(group3);
+
+  // Kroger product matches (seeded from receipts)
+  var group3b = el('div', {class:'settings-group'});
+  var matchCount = Store.list('krogerMatches').length;
+  group3b.appendChild(el('h3', {}, ['Kroger matches (' + matchCount + ')']));
+  group3b.appendChild(el('p', {style:'font-size:12.5px;color:var(--ink-soft);margin:0 4px 10px;'}, ['Products matched to a real UPC from past receipts. This is what a future "Send to Kroger" feature will use instead of guessing.']));
+  var matchSearch = el('input', {type:'search', placeholder:'Search matched products…', style:'margin-bottom:10px;'});
+  group3b.appendChild(matchSearch);
+  var card3b = el('div', {class:'card', style:'padding:4px 14px;max-height:340px;overflow-y:auto;'});
+  function renderMatches(q){
+    card3b.innerHTML = '';
+    var all = Store.list('krogerMatches').sort(function(a,b){ return (b.orderedCount||0)-(a.orderedCount||0) || a.name.localeCompare(b.name); });
+    var filtered = all.filter(function(m){ return !q || normalize(m.name).indexOf(normalize(q)) !== -1; });
+    if (!filtered.length){
+      card3b.appendChild(el('div', {style:'padding:14px 2px;color:var(--ink-soft);font-size:13.5px;'}, [q ? 'No matches found' : 'None yet']));
+      return;
+    }
+    filtered.slice(0, 200).forEach(function(m){
+      card3b.appendChild(el('div', {class:'staple-row'}, [
+        el('span', {class:'sname'}, [
+          m.name,
+          el('span', {style:'display:block;font-size:11.5px;color:var(--ink-soft);margin-top:2px;'}, [m.category + ' · seen ' + (m.orderedCount||1) + 'x · ' + m.upc])
+        ]),
+        el('button', {class:'g-del', onclick: function(){ Store.softDelete('krogerMatches', m.id); renderMatches(matchSearch.value); }}, ['×'])
+      ]));
+    });
+  }
+  renderMatches('');
+  matchSearch.addEventListener('input', function(){ renderMatches(matchSearch.value); });
+  group3b.appendChild(card3b);
+  root.appendChild(group3b);
 
   // Data
   var group4 = el('div', {class:'settings-group'});
@@ -1632,7 +1897,9 @@ $all('.tabbar button').forEach(function(btn){
 
 Store.load();
 seedIfEmpty();
+seedKrogerMatchesIfEmpty();
 State.weekViewMode = Store.get().settings.weekViewMode || 'day';
+handleKrogerRedirectIfPresent();
 render();
 
 if ('serviceWorker' in navigator){
