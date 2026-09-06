@@ -621,6 +621,85 @@ function ensureKrogerToken(){
 // wrong or missing matches are expected to need occasional correction
 // in Settings > Kroger matches.
 var KROGER_MATCH_STOPWORDS = ['and','the','with','for','fresh','organic','of','a','or'];
+
+function krogerSearchTerms(name){
+  var words = normalize(name).replace(/[^a-z0-9\s]/g, ' ').split(' ')
+    .filter(function(w){ return w.length > 2 && KROGER_MATCH_STOPWORDS.indexOf(w) === -1; });
+  var seen = [];
+  words.forEach(function(w){ if (seen.indexOf(w) === -1) seen.push(w); });
+  return seen;
+}
+
+// Live product search, used when nothing in the saved repository matches.
+// Returns a normalized candidate list regardless of Kroger's exact response
+// shape — defensive because this hasn't been confirmed against a real
+// response yet; if Kroger's fields differ, candidates may come back empty
+// and that's the first thing to check.
+function searchKrogerProducts(term){
+  var kroger = Store.get().kroger;
+  return ensureKrogerToken().then(function(token){
+    if (!token || !kroger.workerUrl) return [];
+    return fetch(kroger.workerUrl.replace(/\/$/,'') + '/products/search', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ access_token: token, term: term, locationId: kroger.locationId })
+    }).then(function(r){ return r.json(); })
+      .then(function(data){
+        var list = data && (data.data || data.products || []) || [];
+        return list.map(function(p){
+          var size = (p.items && p.items[0] && p.items[0].size) || '';
+          var name = [p.brand, p.description].filter(Boolean).join(' ') || p.description || 'Unnamed product';
+          return { upc: p.upc || p.productId, name: size ? (name + ', ' + size) : name };
+        }).filter(function(p){ return p.upc; });
+      })
+      .catch(function(){ return []; });
+  });
+}
+
+function saveKrogerMatch(upc, name){
+  return Store.put('krogerMatches', {
+    upc: upc, name: name, category: 'Other',
+    searchTerms: krogerSearchTerms(name), orderedCount: 1
+  });
+}
+
+function openKrogerProductPicker(itemName, onResolved){
+  var body = el('div');
+  var status = el('p', {style:'color:var(--ink-soft);font-size:14px;'}, ['Searching for "' + itemName + '"…']);
+  body.appendChild(status);
+  var listWrap = el('div');
+  body.appendChild(listWrap);
+  openSheet('Find "' + itemName + '"', body, true);
+
+  searchKrogerProducts(itemName).then(function(results){
+    status.remove();
+    if (!results.length){
+      listWrap.appendChild(el('p', {style:'color:var(--ink-soft);font-size:14px;'}, ["No matches found — try adding this one in the Kroger app directly."]));
+      return;
+    }
+    var list = el('ul', {class:'picker-list'});
+    results.forEach(function(p){
+      list.appendChild(el('li', {}, [
+        el('button', {class:'picker-item', onclick: function(){
+          saveKrogerMatch(p.upc, p.name);
+          closeSheet();
+          toast('Saved — added to your cart too');
+          var kroger = Store.get().kroger;
+          ensureKrogerToken().then(function(token){
+            if (!token) return;
+            fetch(kroger.workerUrl.replace(/\/$/,'') + '/cart/add', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({ access_token: token, items: [{ upc: p.upc, quantity: 1, modality: 'DELIVERY' }] })
+            }).catch(function(){});
+          });
+          if (onResolved) onResolved();
+        }}, [p.name])
+      ]));
+    });
+    listWrap.appendChild(list);
+  });
+}
+
 function findKrogerMatch(rawName){
   var norm = normalize(rawName).replace(/\([^)]*\)/g, '');
   var words = norm.split(' ').filter(function(w){ return w.length > 2 && KROGER_MATCH_STOPWORDS.indexOf(w) === -1; });
@@ -692,12 +771,29 @@ function showCartResultSheet(matched, unmatched){
   } else {
     body.appendChild(el('p', {style:'font-size:15px;line-height:1.5;color:var(--ink-soft);'}, ["Nothing on the list matched a saved Kroger product yet."]));
   }
-  if (unmatched.length){
-    body.appendChild(el('div', {class:'section-title'}, ['Add these yourself (' + unmatched.length + ')']));
-    var ul = el('ul', {class:'ing-list'});
-    unmatched.forEach(function(name){ ul.appendChild(el('li', {}, [el('span',{},[name])])); });
-    body.appendChild(ul);
+  var unmatchedWrap = el('div');
+  body.appendChild(unmatchedWrap);
+  function renderUnmatched(){
+    unmatchedWrap.innerHTML = '';
+    if (!unmatched.length) return;
+    unmatchedWrap.appendChild(el('div', {class:'section-title'}, ['Still need to add (' + unmatched.length + ')']));
+    var list = el('ul', {class:'picker-list'});
+    unmatched.forEach(function(name, idx){
+      list.appendChild(el('li', {}, [
+        el('div', {class:'picker-item', style:'cursor:default;'}, [
+          el('span', {}, [name]),
+          el('button', {class:'chip', onclick: function(){
+            openKrogerProductPicker(name, function(){
+              unmatched.splice(idx, 1);
+              renderUnmatched();
+            });
+          }}, ['Find it'])
+        ])
+      ]));
+    });
+    unmatchedWrap.appendChild(list);
   }
+  renderUnmatched();
   if (matched.length){
     body.appendChild(el('a', {href:'https://www.kroger.com/cart', target:'_blank', class:'btn btn-primary btn-block', style:'margin-top:16px;text-decoration:none;text-align:center;'}, ['Open Kroger to finish']));
   }
@@ -1935,7 +2031,7 @@ function renderSettings(){
   var group3b = el('div', {class:'settings-group'});
   var matchCount = Store.list('krogerMatches').length;
   group3b.appendChild(el('h3', {}, ['Kroger matches (' + matchCount + ')']));
-  group3b.appendChild(el('p', {style:'font-size:12.5px;color:var(--ink-soft);margin:0 4px 10px;'}, ['Products matched to a real UPC from past receipts. This is what a future "Send to Kroger" feature will use instead of guessing.']));
+  group3b.appendChild(el('p', {style:'font-size:12.5px;color:var(--ink-soft);margin:0 4px 10px;'}, ['Products matched to a real UPC — from receipts, and from picks made on the "Find it" flow when sending your grocery list to Kroger. Grows on its own; delete a match here if it ever picks the wrong product.']));
   var matchSearch = el('input', {type:'search', placeholder:'Search matched products…', style:'margin-bottom:10px;'});
   group3b.appendChild(matchSearch);
   var card3b = el('div', {class:'card', style:'padding:4px 14px;max-height:340px;overflow-y:auto;'});
